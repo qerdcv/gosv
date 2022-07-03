@@ -2,6 +2,7 @@ package gosv
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"reflect"
 	"strconv"
@@ -31,16 +32,20 @@ func NewWriter(source io.Writer) *Writer {
 	}
 }
 
+// SetDelimiter set delimiter of the csv file
 func (w *Writer) SetDelimiter(delim rune) *Writer {
 	w.delim = delim
 	return w
 }
 
+// SetHeadingFieldDelim set delimiter for header field names
+// Currently nested field namesa are not implemented
 func (w *Writer) SetHeadingFieldDelim(delim rune) *Writer {
 	w.headerFieldDelim = delim
 	return w
 }
 
+// SetWriteHeading set defines write or not to write heading line
 func (w *Writer) SetWriteHeading(writeHeading bool) *Writer {
 	w.wrtHeading = writeHeading
 	return w
@@ -57,19 +62,19 @@ func (w *Writer) setFieldNames(t reflect.Type) {
 	w.fieldNames = fieldNames
 }
 
-func (w *Writer) writeln(line string) {
-	w.source.Write([]byte(line + "\n"))
+func (w *Writer) writeln(line string) (n int, err error) {
+	return w.source.Write([]byte(line + "\n"))
 }
 
-func (w Writer) writeDelSlice(fields []string) {
-	w.writeln(strings.Join(fields, string(w.delim)))
+func (w Writer) writeDelSlice(fields []string) (n int, err error) {
+	return w.writeln(strings.Join(fields, string(w.delim)))
 }
 
-func (w Writer) writeHeading() {
-	w.writeDelSlice(w.fieldNames)
+func (w Writer) writeHeading() (n int, err error) {
+	return w.writeDelSlice(w.fieldNames)
 }
 
-func (w *Writer) writeStruct(t reflect.Value) {
+func (w *Writer) writeStruct(t reflect.Value) (n int, err error) {
 	values := make([]string, 0, len(w.fieldNames))
 
 	for fIdx := range w.fieldNames {
@@ -93,24 +98,32 @@ func (w *Writer) writeStruct(t reflect.Value) {
 		}
 	}
 
-	w.writeDelSlice(values)
+	return w.writeDelSlice(values)
 }
 
-func (w *Writer) Write(v any) error {
+// Write writes passed structure to the writer
+func (w *Writer) Write(v any) (n int, err error) {
 	t := reflect.TypeOf(v)
 
 	if t.Kind() != reflect.Struct {
-		return ErrStructExpected
+		return n, ErrStructExpected
 	}
 
 	w.setFieldNames(t)
 
 	if w.wrtHeading && !w.isHeadingWrited {
-		w.writeHeading()
+		n, err = w.writeHeading()
+		if err != nil {
+			return n, fmt.Errorf("write heading")
+		}
+
 		w.isHeadingWrited = true
 	}
 
-	w.writeStruct(reflect.ValueOf(v))
+	n, err = w.writeStruct(reflect.ValueOf(v))
+	if err != nil {
+		return n, fmt.Errorf("write struct: %w", err)
+	}
 
-	return nil
+	return n, nil
 }
