@@ -7,28 +7,32 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var (
+	// ErrStructExpected returns when trying to write something that is not structure
 	ErrStructExpected = errors.New("struct expected")
 )
 
+// Writer instance of csv writer
 type Writer struct {
 	source           io.Writer
 	fieldNames       []string
 	headerFieldDelim rune
 	delim            rune
 	wrtHeading       bool
-	isHeadingWrited  bool
+	isHeadingWrote   bool
 }
 
+// NewWriter creates Writer instance
 func NewWriter(source io.Writer) *Writer {
 	return &Writer{
 		source:           source,
 		headerFieldDelim: '.',
 		delim:            ',',
 		wrtHeading:       false,
-		isHeadingWrited:  false,
+		isHeadingWrote:   false,
 	}
 }
 
@@ -80,21 +84,26 @@ func (w *Writer) writeStruct(t reflect.Value) (n int, err error) {
 	for fIdx := range w.fieldNames {
 		val := t.Field(fIdx).Interface()
 
-		switch val := val.(type) {
+		switch v := val.(type) {
 		case string:
-			values = append(values, val)
+			values = append(values, v)
 		case int:
-			values = append(values, strconv.FormatInt(int64(val), 10))
+			values = append(values, strconv.FormatInt(int64(v), 10))
 		case int32:
-			values = append(values, strconv.FormatInt(int64(val), 10))
+			values = append(values, strconv.FormatInt(int64(v), 10))
 		case int64:
-			values = append(values, strconv.FormatInt(int64(val), 10))
+			values = append(values, strconv.FormatInt(v, 10))
 		case float32:
-			values = append(values, strconv.FormatFloat(float64(val), 'f', 2, 32))
+			values = append(values, strconv.FormatFloat(float64(v), 'f', 2, 32))
 		case float64:
-			values = append(values, strconv.FormatFloat(float64(val), 'f', 2, 64))
+			values = append(values, strconv.FormatFloat(v, 'f', 2, 64))
 		case bool:
-			values = append(values, strconv.FormatBool(val))
+			values = append(values, strconv.FormatBool(v))
+		case time.Time:
+			// todo: in default check for method "String", and call it
+			values = append(values, v.String())
+		default:
+			values = append(values, "")
 		}
 	}
 
@@ -102,25 +111,32 @@ func (w *Writer) writeStruct(t reflect.Value) (n int, err error) {
 }
 
 // Write writes passed structure to the writer
-func (w *Writer) Write(v any) (n int, err error) {
+func (w *Writer) Write(v interface{}) (n int, err error) {
 	t := reflect.TypeOf(v)
+	val := reflect.ValueOf(v)
 
-	if t.Kind() != reflect.Struct {
-		return n, ErrStructExpected
+	if kind := t.Kind(); kind != reflect.Struct && kind != reflect.Ptr {
+		return n, fmt.Errorf("%w got %s", ErrStructExpected, kind.String())
+	}
+
+	if t.Kind() == reflect.Ptr {
+		// deref pointer
+		t = t.Elem()
+		val = val.Elem()
 	}
 
 	w.setFieldNames(t)
 
-	if w.wrtHeading && !w.isHeadingWrited {
+	if w.wrtHeading && !w.isHeadingWrote {
 		n, err = w.writeHeading()
 		if err != nil {
-			return n, fmt.Errorf("write heading")
+			return n, fmt.Errorf("write heading: %w", err)
 		}
 
-		w.isHeadingWrited = true
+		w.isHeadingWrote = true
 	}
 
-	n, err = w.writeStruct(reflect.ValueOf(v))
+	n, err = w.writeStruct(val)
 	if err != nil {
 		return n, fmt.Errorf("write struct: %w", err)
 	}
